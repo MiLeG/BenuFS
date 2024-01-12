@@ -6,6 +6,7 @@
 #include "syscall.h"
 #include "device.h"
 #include "memory.h"
+#include "fs.h"
 #include <kernel/errno.h>
 #include <kernel/features.h>
 #include <arch/interrupt.h>
@@ -51,6 +52,9 @@ void k_startup()
 	k_stdout = k_device_open(K_STDOUT, O_WRONLY);
 
 	kprintf("%s\n", system_info);
+
+	/* filesystem init */
+	k_fs_init("DISK", 512, 4096);
 
 	/* thread subsystem */
 	kthreads_init();

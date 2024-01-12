@@ -2,6 +2,7 @@
 #define _K_DEVICE_C_
 
 #include "device.h"
+#include "fs.h"
 
 #include <kernel/errno.h> /* shares errno with arch layer */
 #include "memory.h"
@@ -245,7 +246,7 @@ int sys__open(void *p)
 {
 	char *pathname;
 	int flags;
-	/* mode_t mode - not used */
+	mode_t mode;
 	descriptor_t *desc;
 
 	kdevice_t *kdev;
@@ -254,8 +255,8 @@ int sys__open(void *p)
 
 
 	pathname =	*((char **) p);		p += sizeof(char *);
-	flags =		*((int *) p);			p += sizeof(int);
-	/* pathname =	*((char **) p); */		p += sizeof(mode_t);
+	flags =		*((int *) p);		p += sizeof(int);
+	mode =		*((int*) p);		p += sizeof(mode_t);
 	desc =		*((descriptor_t **) p);
 
 	proc = kthread_get_process(NULL);
@@ -267,6 +268,15 @@ int sys__open(void *p)
 	ASSERT_ERRNO_AND_EXIT(desc, EINVAL);
 	desc = U2K_GET_ADR(desc, proc);
 	ASSERT_ERRNO_AND_EXIT(desc, EINVAL);
+
+
+	if (strstr(pathname, "file:") == pathname) {
+		int retval = k_fs_open_file(pathname, flags, mode, desc);
+		if (retval >= 0)
+			EXIT2(EXIT_SUCCESS, retval);
+		else
+			EXIT2(-retval, -1);
+	}
 
 	kdev = k_device_open(pathname, flags);
 
@@ -303,6 +313,15 @@ int sys__close(void *p)
 	ASSERT_ERRNO_AND_EXIT(desc, EINVAL);
 	desc = U2K_GET_ADR(desc, proc);
 	ASSERT_ERRNO_AND_EXIT(desc, EINVAL);
+
+	if (k_fs_is_file_open(desc) == 0) {
+		int retval = k_fs_close_file(desc);
+		if (retval == 0)
+			EXIT2(EXIT_SUCCESS, retval);
+		else
+			EXIT2(-retval, -1);
+	}
+
 
 	kobj = desc->ptr;
 	ASSERT_ERRNO_AND_EXIT(kobj, EINVAL);
@@ -357,6 +376,16 @@ static int read_write(void *p, int op)
 	ASSERT_ERRNO_AND_EXIT(buffer, EINVAL);
 	ASSERT_ERRNO_AND_EXIT(size > 0, EINVAL);
 
+
+	if (k_fs_is_file_open(desc) == 0) {
+		retval = k_fs_read_write(desc, buffer, size, op);
+		if (retval > 0)
+			EXIT2(EXIT_SUCCESS, retval);
+		else
+			EXIT2(EXIT_FAILURE, retval);
+	}
+
+
 	kobj = desc->ptr;
 	ASSERT_ERRNO_AND_EXIT(kobj, EINVAL);
 	ASSERT_ERRNO_AND_EXIT(list_find(&proc->kobjects, &kobj->list),
@@ -384,6 +413,9 @@ int kdevice_status(descriptor_t *desc, int flags, kprocess_t *proc)
 	int status, rflags = 0;
 
 	ASSERT_AND_RETURN_ERRNO(desc, EINVAL);
+
+	if (k_fs_is_file_open(desc) == 0)
+		EXIT2(EXIT_SUCCESS, rflags);
 
 	kobj = desc->ptr;
 	ASSERT_AND_RETURN_ERRNO(kobj, EINVAL);
