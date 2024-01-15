@@ -1,14 +1,15 @@
-#define _K_FS_C_
+#define _K_SIMPLEFS_C_
 
 #include <kernel/errno.h>
 #include <kernel/memory.h>
 #include <types/io.h>
 #include <lib/list.h>
 #include <lib/string.h>
-#include "fs.h"
+#include "simplefs.h"
 #include "device.h"
 #include "time.h"
 #include "memory.h"
+#include "vfs.h"
 
 static kdevice_t* disk;
 #define DISK_WRITE(buffer, blocks, first_block) \
@@ -22,10 +23,14 @@ k_device_recv(buffer, (first_block << 16) | blocks, 0, disk);
 
 static struct fs_table* ft;
 static size_t ft_size;
-static struct kfile_desc* last_check;
+static struct simplefs_file_desc* last_check;
 static list_t open_files;
 
-int k_fs_init(char* disk_device, size_t bsize, size_t blocks){
+static int k_simplefs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc);
+static int k_simplefs_close_file(descriptor_t* desc);
+static int k_simplefs_read_write(descriptor_t* desc, void* buffer, size_t size, int op);
+
+int k_simplefs_init(char* disk_device, size_t bsize, size_t blocks){
 	disk = k_device_open(disk_device, 0);
 	assert(disk);
 
@@ -50,48 +55,25 @@ int k_fs_init(char* disk_device, size_t bsize, size_t blocks){
 
 	last_check = NULL;
 
+	//create vfs struct and register
+	kvfs_t vfs = {
+		.is_open = k_simplefs_is_file_open,
+		.open = k_simplefs_open_file,
+		.close = k_simplefs_close_file,
+		.read_write = k_simplefs_read_write
+	};
+	k_vfs_register(disk_device, &vfs);
+
+
 	return 0;
 }
 
-int k_fs_is_file_open(descriptor_t* desc){
-
-	kobject_t* kobj;
-	kprocess_t* proc;
-
-	proc = kthread_get_process(NULL);
-
-
-	kobj = desc->ptr;
-	if(kobj && list_find(&proc->kobjects, &kobj->list) &&
-	   (kobj->flags & KTYPE_FILE) != 0){
-		struct kfile_desc* fd = kobj->kobject;
-		if(fd && fd->id == desc->id &&
-		   list_find(&open_files, &fd->list)){
-			last_check = fd;
-			return 0;
-		}
-	}
-
-	return -1;
-}
-
-int k_fs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
+int k_simplefs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 	struct fs_node* tfd = NULL;
-	char* fname = &pathname[5];
-	kprocess_t* proc;
-
-	proc = kthread_get_process(NULL);
-
-
-	//check for conflicting flags
-	if(((flags & O_RDONLY) && (flags & O_WRONLY)) ||
-	   ((flags & O_RDONLY) && (flags & O_RDWR)) ||
-	   ((flags & O_WRONLY) && (flags & O_RDWR)))
-		return -EINVAL;
-
+	char* fname = pathname;
 
 	//check if file already open
-	struct kfile_desc* fd = list_get(&open_files, FIRST);
+	struct simplefs_file_desc* fd = list_get(&open_files, FIRST);
 	while(fd != NULL){
 		if(strcmp(fd->tfd->node_name, fname) == 0){
 			//already open!
@@ -147,7 +129,7 @@ int k_fs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 	}
 
 	//create kobject and a new struct kfile_desc
-	kobject_t* kobj = kmalloc_kobject(proc, sizeof(struct kfile_desc));
+	kobject_t* kobj = kmalloc_kobject(proc, sizeof(struct simplefs_file_desc));
 	kobj->flags = KTYPE_FILE;
 	fd = kobj->kobject;
 	fd->tfd = tfd;
@@ -163,8 +145,8 @@ int k_fs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 	return 0;
 }
 
-int k_fs_close_file(descriptor_t* desc){
-	struct kfile_desc* fd = last_check;
+int k_simplefs_close_file(descriptor_t* desc){
+	struct simplefs_file_desc* fd = last_check;
 	kobject_t* kobj;
 	kprocess_t* proc;
 
@@ -187,10 +169,10 @@ int k_fs_close_file(descriptor_t* desc){
 }
 
 //op = 0 => write, otherwise =>read
-int k_fs_read_write(descriptor_t* desc, void* buffer, size_t size, int op){
+int k_simplefs_read_write(descriptor_t* desc, void* buffer, size_t size, int op){
 
 	//desc already checked, use "last_check";
-	struct kfile_desc* fd = last_check;
+	struct simplefs_file_desc* fd = last_check;
 
 	//sanity check
 	if((op && (fd->flags & O_WRONLY)) || (!op && (fd->flags & O_RDONLY)))

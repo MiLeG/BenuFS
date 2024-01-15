@@ -1,19 +1,17 @@
 /*! Simple file system */
 #pragma once
 
-int k_fs_init(char *disk_device, size_t bsize, size_t blocks);
-int k_fs_is_file_open(descriptor_t *desc);
-int k_fs_open_file(char *pathname, int flags, mode_t mode, descriptor_t *desc);
-int k_fs_close_file(descriptor_t *desc);
-int k_fs_read_write(descriptor_t *desc, void *buffer, size_t size, int op);
+int k_simplefs_init(char *disk_device, size_t bsize, size_t blocks);
 
-#ifdef _K_FS_C_
+#define _K_SIMPLEFS_C_
+
+#ifdef _K_SIMPLEFS_C_
 
 #include "thread.h"
 #include <types/time.h>
+#include "vfs.h"
 
 #define FS_TYPE		42 //any number will do :)
-#define KTYPE_FILE	(1<<10)
 
 #define MAXFILESONDISK	16
 #define MAXFILENAMESIZE	16
@@ -46,7 +44,7 @@ struct fs_table {
 */
 
 //open file descriptor
-struct kfile_desc {
+struct simplefs_file_desc {
 	id_t id;    // kernel object id
 	struct fs_node *tfd; //pointer to descriptor in file table in memory
 	int flags;
@@ -54,4 +52,4 @@ struct kfile_desc {
 	list_h list;
 };
 
-#endif /* _K_FS_C_ */
+#endif /* _K_SIMPLEFS_C_ */
