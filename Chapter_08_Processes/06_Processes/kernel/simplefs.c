@@ -171,13 +171,6 @@ int k_simplefs_close_file(descriptor_t* desc){
 //op = 0 => write, otherwise =>read
 int k_simplefs_read_write(descriptor_t* desc, void* buffer, size_t size, int op){
 
-	//desc already checked, use "last_check";
-	struct simplefs_file_desc* fd = last_check;
-
-	//sanity check
-	if((op && (fd->flags & O_WRONLY)) || (!op && (fd->flags & O_RDONLY)))
-		return -EPERM;
-
 	if(op){
 		//read from offset "fd->fp" to "buffer" "size" bytes
 

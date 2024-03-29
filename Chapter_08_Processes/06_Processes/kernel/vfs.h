@@ -4,11 +4,11 @@
 /*! VFS object */
 typedef struct _kvfs_t_ {
 
-	int (* open)(char* pathname, int flags, mode_t mode, descriptor_t* desc);
+	int (* open)(const char* pathname, int flags, mode_t mode);
 
-	int (* close)(descriptor_t* desc);
+	int (* close)(int fd);
 
-	int (* read_write)(descriptor_t* desc, void* buffer, size_t size, int op);
+	int (* read_write)(int fd, void* buffer, size_t size, int op);
 } kvfs_t;
 
 int k_vfs_register(const char* base_path, const kvfs_t* vfs);
@@ -38,9 +38,10 @@ int k_fs_read_write(descriptor_t* desc, void* buffer, size_t size, int op);
  */
 #define VFS_MAX_FDS         64
 
-struct kfile_desc {
+typedef struct kfile_desc {
 	id_t id;    // kernel object id
-	int vfs_fd; // vfs file descriptor id
-};
+	int vfs_fd; // vfs file descriptor index
+	int flags;
+} kfile_desc_t;
 
 #endif /* _K_VFS_C_ */

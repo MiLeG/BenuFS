@@ -5,7 +5,7 @@
 #include <kernel/memory.h>
 #include "vfs.h"
 #include "memory.h"
-
+#include ASSERT_H
 
 typedef int8 vfs_index_t;
 typedef uint8 local_fd_t;
@@ -26,7 +26,7 @@ typedef struct _vfs_entry_t_ {
 static vfs_entry_t* s_vfs[VFS_MAX_COUNT] = { 0 };
 static size_t s_vfs_count = 0;
 
-static fd_table_t s_fd_table[VFS_MAX_FDS] = { [0 ... VFS_MAX_FDS - 1] = FD_TABLE_ENTRY_UNUSED };
+static fd_table_t s_fd_table[VFS_MAX_FDS] = { [0 ... VFS_MAX_FDS - 1] = FD_TABLE_ENTRY_UNUSED};
 static struct kfile_desc* last_check;
 
 static const vfs_entry_t* get_vfs_for_path(const char* path){
@@ -55,18 +55,29 @@ static const vfs_entry_t* get_vfs_for_index(int index){
 	}
 }
 
-static const vfs_entry_t* get_vfs_for_id(int fd){
+static const vfs_entry_t* get_vfs_for_fd(int fd){
 	const vfs_entry_t* vfs = NULL;
 	if(vfs_fd_valid(fd)){
-		const int index = s_fd_table[fd].vfs_index;
+		const int index = s_fd_table[fd].vfs_index; // single read -> no locking is required
 		vfs = get_vfs_for_index(index);
 	}
 	return vfs;
 }
 
+static inline int get_local_fd(const vfs_entry_t* vfs, int fd){
+	int local_fd = -1;
+
+	if(vfs && vfs_fd_valid(fd)){
+		local_fd = s_fd_table[fd].local_fd; // single read -> no locking is required
+	}
+
+	return local_fd;
+}
+
+
 static const char* translate_path(const vfs_entry_t* vfs, const char* src_path){
 	ASSERT(strncmp(src_path, vfs->path_prefix, strlen(vfs->path_prefix)) == 0);
-	return src_path + vfs->path_prefix_len;
+	return src_path + strlen(vfs->path_prefix);
 }
 
 int k_vfs_register(const char* base_path, const kvfs_t* vfs){
@@ -136,9 +147,8 @@ int k_fs_is_file_open(descriptor_t* desc){
 	kprocess_t* proc;
 
 	proc = kthread_get_process(NULL);
-
-
 	kobj = desc->ptr;
+
 	if(kobj && list_find(&proc->kobjects, &kobj->list) &&
 	   (kobj->flags & KTYPE_FILE) != 0){
 		struct kfile_desc* fd = kobj->kobject;
@@ -152,11 +162,8 @@ int k_fs_is_file_open(descriptor_t* desc){
 }
 
 int k_fs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
-	char* fname = &pathname[5];
-	kprocess_t* proc;
-
-	proc = kthread_get_process(NULL);
-
+//	char* fname = &pathname[5];
+	char* fname = pathname; //Depending on file path prefix (possibly '/')
 
 	//check for conflicting flags
 	if(((flags & O_RDONLY) && (flags & O_WRONLY)) ||
@@ -170,7 +177,7 @@ int k_fs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 		return -ENOENT;
 	}
 	const char* path_within_vfs = translate_path(vfs, fname);
-	int fd_within_vfs = vfs->vfs->open(path_within_vfs, flags, mode, desc);
+	int fd_within_vfs = vfs->vfs.open(path_within_vfs, flags, mode);
 
 	int vfs_index = -1;
 	if(fd_within_vfs >= 0){
@@ -186,21 +193,61 @@ int k_fs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 		}
 //		_lock_release(&s_fd_table_lock);
 
-
-		int ret;
-		CHECK_AND_CALL(ret, r, vfs, close, fd_within_vfs);
-		(void) ret; // remove "set but not used" warning
-		__errno_r(r) = ENOMEM;
-		return -1;
+		if(vfs_index == -1){
+			vfs->vfs.close(fd_within_vfs);
+			return -ENOMEM;
+		}
+	}else{
+		return -ENFILE;
 	}
-	__errno_r(r) = errno;
-	return -1;
+
+	kprocess_t* proc;
+	proc = kthread_get_process(NULL);
+	//create kobject and a new struct kfile_desc
+	kobject_t* kobj = kmalloc_kobject(proc, sizeof(struct kfile_desc));
+	kobj->flags = KTYPE_FILE;
+	kfile_desc_t* fd = kobj->kobject;
+	fd->vfs_fd = vfs_index;
+	fd->flags = flags;
+	fd->id = k_new_id();
+
+	//fill desc
+	desc->id = fd->id;
+	desc->ptr = kobj;
+
+	return 0;
 }
 
 int k_fs_close_file(descriptor_t* desc){
+	int fd = last_check->vfs_fd;
+	const vfs_entry_t* vfs = get_vfs_for_fd(fd);
+	const int local_fd = get_local_fd(vfs, fd);
+	if(vfs == NULL || local_fd < 0){
+		return -EBADF;
+	}
+	int ret;
+	ret = vfs->vfs.close(local_fd);
 
+//	_lock_acquire(&s_fd_table_lock);
+	s_fd_table[fd] = FD_TABLE_ENTRY_UNUSED;
+//	_lock_release(&s_fd_table_lock);
+
+	return ret;
 }
 
 int k_fs_read_write(descriptor_t* desc, void* buffer, size_t size, int op){
+	kfile_desc_t* fd = last_check;
 
+	if((op && (fd->flags & O_WRONLY)) || (!op && (fd->flags & O_RDONLY)))
+		return -EPERM;
+
+	int fd_index = fd->vfs_fd;
+	const vfs_entry_t* vfs = get_vfs_for_fd(fd_index);
+	const int local_fd = get_local_fd(vfs, fd_index);
+	if(vfs == NULL || local_fd < 0){
+		return -EBADF;
+	}
+
+	int ret = vfs->vfs.read_write(local_fd, buffer, size, op);
+	return ret;
 }
