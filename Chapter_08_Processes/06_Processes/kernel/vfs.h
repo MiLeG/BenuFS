@@ -3,8 +3,7 @@
 
 /*! VFS object */
 typedef struct _kvfs_t_ {
-
-	int (* open)(const char* pathname, int flags, mode_t mode);
+	int (* open)(char* pathname, int flags, mode_t mode);
 
 	int (* close)(int fd);
 

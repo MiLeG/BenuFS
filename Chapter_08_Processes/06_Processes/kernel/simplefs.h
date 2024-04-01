@@ -1,7 +1,7 @@
 /*! Simple file system */
 #pragma once
 
-int k_simplefs_init(char *disk_device, size_t bsize, size_t blocks);
+int k_simplefs_init(char* disk_device, size_t bsize, size_t blocks);
 
 #define _K_SIMPLEFS_C_
 
@@ -11,11 +11,11 @@ int k_simplefs_init(char *disk_device, size_t bsize, size_t blocks);
 #include <types/time.h>
 #include "vfs.h"
 
-#define FS_TYPE		42 //any number will do :)
+#define FS_TYPE        42 //any number will do :)
 
-#define MAXFILESONDISK	16
-#define MAXFILENAMESIZE	16
-#define MAXFILEBLOCKS	16
+#define MAXFILESONDISK    16
+#define MAXFILENAMESIZE    16
+#define MAXFILEBLOCKS    16
 
 struct fs_node {
 	char node_name[MAXFILENAMESIZE];
@@ -45,11 +45,9 @@ struct fs_table {
 
 //open file descriptor
 struct simplefs_file_desc {
-	id_t id;    // kernel object id
-	struct fs_node *tfd; //pointer to descriptor in file table in memory
+	struct fs_node* tfd; //pointer to descriptor in file table in memory
 	int flags;
 	size_t fp; //file pointer, offset from beginning
-	list_h list;
 };
 
 #endif /* _K_SIMPLEFS_C_ */

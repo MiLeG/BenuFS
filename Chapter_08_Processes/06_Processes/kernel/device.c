@@ -270,7 +270,7 @@ int sys__open(void *p)
 	ASSERT_ERRNO_AND_EXIT(desc, EINVAL);
 
 
-	if (strstr(pathname, "file:") == pathname) {
+	if (pathname[0] == '/') {
 		int retval = k_fs_open_file(pathname, flags, mode, desc);
 		if (retval >= 0)
 			EXIT2(EXIT_SUCCESS, retval);

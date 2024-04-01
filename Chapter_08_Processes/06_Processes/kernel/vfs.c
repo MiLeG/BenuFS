@@ -36,6 +36,7 @@ static const vfs_entry_t* get_vfs_for_path(const char* path){
 		const vfs_entry_t* vfs = s_vfs[i];
 
 		if(strncmp(path, vfs->path_prefix, strlen(vfs->path_prefix)) == 0){
+			vfs_match = vfs;
 			break;
 		}
 	}
@@ -162,8 +163,7 @@ int k_fs_is_file_open(descriptor_t* desc){
 }
 
 int k_fs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
-//	char* fname = &pathname[5];
-	char* fname = pathname; //Depending on file path prefix (possibly '/')
+	char* fname = pathname;
 
 	//check for conflicting flags
 	if(((flags & O_RDONLY) && (flags & O_WRONLY)) ||
@@ -171,13 +171,12 @@ int k_fs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 	   ((flags & O_WRONLY) && (flags & O_RDWR)))
 		return -EINVAL;
 
-
 	const vfs_entry_t* vfs = get_vfs_for_path(fname);
 	if(vfs == NULL){
 		return -ENOENT;
 	}
 	const char* path_within_vfs = translate_path(vfs, fname);
-	int fd_within_vfs = vfs->vfs.open(path_within_vfs, flags, mode);
+	int fd_within_vfs = vfs->vfs.open((char*) path_within_vfs, flags, mode);
 
 	int vfs_index = -1;
 	if(fd_within_vfs >= 0){

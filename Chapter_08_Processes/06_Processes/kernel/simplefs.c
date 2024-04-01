@@ -3,7 +3,6 @@
 #include <kernel/errno.h>
 #include <kernel/memory.h>
 #include <types/io.h>
-#include <lib/list.h>
 #include <lib/string.h>
 #include "simplefs.h"
 #include "device.h"
@@ -23,12 +22,14 @@ k_device_recv(buffer, (first_block << 16) | blocks, 0, disk);
 
 static struct fs_table* ft;
 static size_t ft_size;
-static struct simplefs_file_desc* last_check;
-static list_t open_files;
 
-static int k_simplefs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc);
-static int k_simplefs_close_file(descriptor_t* desc);
-static int k_simplefs_read_write(descriptor_t* desc, void* buffer, size_t size, int op);
+//TODO - dinamična alokacija ovoga s max brojem otvorenih fileova kao argument u initu
+static struct simplefs_file_desc fd_table[VFS_MAX_FDS];
+
+
+static int k_simplefs_open_file(char* pathname, int flags, mode_t mode);
+static int k_simplefs_close_file(int fd);
+static int k_simplefs_read_write(int fd, void* buffer, size_t size, int op);
 
 int k_simplefs_init(char* disk_device, size_t bsize, size_t blocks){
 	disk = k_device_open(disk_device, 0);
@@ -51,31 +52,28 @@ int k_simplefs_init(char* disk_device, size_t bsize, size_t blocks){
 
 	DISK_WRITE(ft, ft_size, 0);
 
-	list_init(&open_files);
-
-	last_check = NULL;
+	memset(&fd_table, 0, sizeof(fd_table));
 
 	//create vfs struct and register
 	kvfs_t vfs = {
-		.is_open = k_simplefs_is_file_open,
-		.open = k_simplefs_open_file,
-		.close = k_simplefs_close_file,
-		.read_write = k_simplefs_read_write
+			.open = k_simplefs_open_file,
+			.close = k_simplefs_close_file,
+			.read_write = k_simplefs_read_write
 	};
-	k_vfs_register(disk_device, &vfs);
+	k_vfs_register("/simplefs", &vfs);
 
 
 	return 0;
 }
 
-int k_simplefs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
+int k_simplefs_open_file(char* pathname, int flags, mode_t mode){
 	struct fs_node* tfd = NULL;
-	char* fname = pathname;
+	const char* fname = pathname;
 
 	//check if file already open
-	struct simplefs_file_desc* fd = list_get(&open_files, FIRST);
-	while(fd != NULL){
-		if(strcmp(fd->tfd->node_name, fname) == 0){
+	struct simplefs_file_desc* fd = fd_table;
+	for(int i = 0; i < VFS_MAX_FDS; i++){
+		if(fd->tfd && strcmp(fd->tfd->node_name, fname) == 0){
 			//already open!
 			//if its open for reading and O_RDONLY is set in flags
 			if((fd->flags & O_RDONLY) == (flags & O_RDONLY))
@@ -84,9 +82,8 @@ int k_simplefs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* d
 				return -EADDRINUSE; //not fine
 
 		}
-		fd = list_get_next(&fd->list);
+		fd++;
 	}
-
 
 	if(!tfd){
 		//not already open; check if such file exists in file table
@@ -128,48 +125,38 @@ int k_simplefs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* d
 		tfd->blocks = 0;
 	}
 
-	//create kobject and a new struct kfile_desc
-	kobject_t* kobj = kmalloc_kobject(proc, sizeof(struct simplefs_file_desc));
-	kobj->flags = KTYPE_FILE;
-	fd = kobj->kobject;
-	fd->tfd = tfd;
-	fd->flags = flags;
-	fd->fp = 0;
-	fd->id = k_new_id();
-	list_append(&open_files, fd, &fd->list);
+	//find free file descriptor
+	fd = fd_table;
+	for(int i = 0; i < VFS_MAX_FDS; i++){
+		if(fd->tfd == NULL){
+			fd->tfd = tfd;
+			fd->flags = flags;
+			fd->fp = 0;
+			return i;
+		}
+		fd++;
+	}
 
-	//fill desc
-	desc->id = fd->id;
-	desc->ptr = kobj;
-
-	return 0;
+	return -ENFILE;
 }
 
-int k_simplefs_close_file(descriptor_t* desc){
-	struct simplefs_file_desc* fd = last_check;
-	kobject_t* kobj;
-	kprocess_t* proc;
+int k_simplefs_close_file(int fd){
+	if(fd < 0 || fd >= VFS_MAX_FDS)
+		return -EBADF;
 
-	kobj = desc->ptr;
-	proc = kthread_get_process(NULL);
-	/* - already tested!
-	if (!kobj || !list_find(&kobjects, &kobj->list))
-		return -EINVAL;
-
-	fd = kobj->kobject;
-	if (!fd || fd->id != desc->id)
-		return -EINVAL;
-	*/
-	if(!list_find_and_remove(&open_files, &fd->list))
-		return -EINVAL;
-
-	kfree_kobject(proc, kobj);
+	fd_table[fd].tfd = NULL;
+	fd_table[fd].flags = 0;
+	fd_table[fd].fp = 0;
 
 	return 0;
 }
 
 //op = 0 => write, otherwise =>read
-int k_simplefs_read_write(descriptor_t* desc, void* buffer, size_t size, int op){
+int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op){
+	if(fd_index < 0 || fd_index >= VFS_MAX_FDS)
+		return -EBADF;
+
+	struct simplefs_file_desc* fd = &fd_table[fd_index];
 
 	if(op){
 		//read from offset "fd->fp" to "buffer" "size" bytes
