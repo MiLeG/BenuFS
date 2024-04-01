@@ -8,21 +8,21 @@ char PROG_HELP[] = "Filesystem demo test.";
 
 void createWriteTwoRead(){
 	//create, write, read content with two read files open
-	int fd = open("file:test", O_CREAT | O_WRONLY, 0);
+	int fd = open("/simplefs/test", O_CREAT | O_WRONLY, 0);
 	printf("fd=%d\n", fd);
 	int retval = write(fd, "neki tekst", 11);
 	printf("retval=%d\n", retval);
 	retval = close(fd);
 	printf("retval=%d\n", retval);
 
-	fd = open("file:test", O_RDONLY, 0);
+	fd = open("/simplefs/test", O_RDONLY, 0);
 	printf("fd=%d\n", fd);
 	char buff[11];
 	retval = read(fd, buff, 11);
 	printf("retval=%d\n", retval);
 	printf("buff=%s\n", buff);
 
-	int fd2 = open("file:test", O_RDONLY, 0);
+	int fd2 = open("/simplefs/test", O_RDONLY, 0);
 	printf("second fd=%d\n", fd2);
 	retval = read(fd2, buff, 11);
 	printf("retval=%d\n", retval);
@@ -34,12 +34,12 @@ void createWriteTwoRead(){
 
 void rewriteNoNewBlock(){
 	//rewrite without new block allocation
-	int fd = open("file:test", O_WRONLY, 0);
+	int fd = open("/simplefs/test", O_WRONLY, 0);
 	write(fd, "neki tekstttt", 14);
 	close(fd);
 
 	char buf[14];
-	fd = open("file:test", O_RDONLY, 0);
+	fd = open("/simplefs/test", O_RDONLY, 0);
 	read(fd, buf, 14);
 	printf("buff=%s\n", buf);
 	close(fd);
@@ -50,7 +50,7 @@ void rewriteNewBlocks(){
 	char buf[500];
 	memset(buf, 'a', sizeof(buf));
 	buf[sizeof(buf) - 1] = '\0';
-	int fd = open("file:test", O_WRONLY, 0);
+	int fd = open("/simplefs/test", O_WRONLY, 0);
 	int retval = write(fd, buf, sizeof(buf));
 	printf("retval=%d\n", retval);
 	retval = write(fd, buf, sizeof(buf));
@@ -60,7 +60,7 @@ void rewriteNewBlocks(){
 	retval = close(fd);
 	printf("closing retval=%d\n", retval);
 
-	fd = open("file:test", O_RDONLY, 0);
+	fd = open("/simplefs/test", O_RDONLY, 0);
 	printf("fd=%d\n", fd);
 
 	char readBuf[500];
