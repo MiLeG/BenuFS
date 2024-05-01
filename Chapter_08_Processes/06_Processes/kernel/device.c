@@ -271,7 +271,7 @@ int sys__open(void *p)
 
 
 	if (pathname[0] == '/') {
-		int retval = k_fs_open_file(pathname, flags, mode, desc);
+		int retval = k_vfs_open_file(pathname, flags, mode, desc);
 		if (retval >= 0)
 			EXIT2(EXIT_SUCCESS, retval);
 		else
@@ -314,8 +314,8 @@ int sys__close(void *p)
 	desc = U2K_GET_ADR(desc, proc);
 	ASSERT_ERRNO_AND_EXIT(desc, EINVAL);
 
-	if (k_fs_is_file_open(desc) == 0) {
-		int retval = k_fs_close_file(desc);
+	if (k_vfs_is_file_open(desc) == 0) {
+		int retval = k_vfs_close_file(desc);
 		if (retval == 0)
 			EXIT2(EXIT_SUCCESS, retval);
 		else
@@ -377,8 +377,8 @@ static int read_write(void *p, int op)
 	ASSERT_ERRNO_AND_EXIT(size > 0, EINVAL);
 
 
-	if (k_fs_is_file_open(desc) == 0) {
-		retval = k_fs_read_write(desc, buffer, size, op);
+	if (k_vfs_is_file_open(desc) == 0) {
+		retval = k_vfs_read_write(desc, buffer, size, op);
 		if (retval > 0)
 			EXIT2(EXIT_SUCCESS, retval);
 		else
@@ -414,7 +414,7 @@ int kdevice_status(descriptor_t *desc, int flags, kprocess_t *proc)
 
 	ASSERT_AND_RETURN_ERRNO(desc, EINVAL);
 
-	if (k_fs_is_file_open(desc) == 0)
+	if (k_vfs_is_file_open(desc) == 0)
 		EXIT2(EXIT_SUCCESS, rflags);
 
 	kobj = desc->ptr;

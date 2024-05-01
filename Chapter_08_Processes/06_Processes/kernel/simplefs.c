@@ -54,13 +54,13 @@ int k_simplefs_init(char* disk_device, size_t bsize, size_t blocks){
 
 	memset(&fd_table, 0, sizeof(fd_table));
 
-	//create vfs struct and register
-	kvfs_t vfs = {
+	//create lfs struct and register
+	klfs_t descriptor = {
 			.open = k_simplefs_open_file,
 			.close = k_simplefs_close_file,
 			.read_write = k_simplefs_read_write
 	};
-	k_vfs_register("/simplefs", &vfs);
+	k_lfs_register("/simplefs", &descriptor);
 
 
 	return 0;
