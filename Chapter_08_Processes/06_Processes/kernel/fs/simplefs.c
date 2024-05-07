@@ -5,9 +5,9 @@
 #include <types/io.h>
 #include <lib/string.h>
 #include "simplefs.h"
-#include "device.h"
-#include "time.h"
-#include "memory.h"
+#include "../device.h"
+#include "../time.h"
+#include "../memory.h"
 #include "vfs.h"
 
 static kdevice_t* disk;

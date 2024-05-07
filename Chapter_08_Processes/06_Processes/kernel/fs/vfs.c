@@ -4,7 +4,7 @@
 #include <types/errno.h>
 #include <kernel/memory.h>
 #include "vfs.h"
-#include "memory.h"
+#include "../memory.h"
 #include ASSERT_H
 
 typedef int8 vfs_index_t;

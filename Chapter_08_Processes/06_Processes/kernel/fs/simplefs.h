@@ -7,7 +7,7 @@ int k_simplefs_init(char* disk_device, size_t bsize, size_t blocks);
 
 #ifdef _K_SIMPLEFS_C_
 
-#include "thread.h"
+#include "../thread.h"
 #include <types/time.h>
 #include "vfs.h"
 

@@ -2,7 +2,7 @@
 #define _K_DEVICE_C_
 
 #include "device.h"
-#include "vfs.h"
+#include "fs/vfs.h"
 
 #include <kernel/errno.h> /* shares errno with arch layer */
 #include "memory.h"

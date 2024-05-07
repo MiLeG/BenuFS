@@ -1,17 +1,7 @@
 /*! Virtual file system */
 #pragma once
 
-/*! VFS object */
-typedef struct _klfs_t_ {
-	int (* open)(char* pathname, int flags, mode_t mode);
-
-	int (* close)(int fd);
-
-	int (* read_write)(int fd, void* buffer, size_t size, int op);
-} klfs_t;
-
-int k_lfs_register(const char* base_path, const klfs_t* lfs);
-int k_lfs_unregister(const char* base_path);
+#include "lfs.h"
 
 int k_vfs_is_file_open(descriptor_t* desc);
 int k_vfs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc);
@@ -21,8 +11,8 @@ int k_vfs_read_write(descriptor_t* desc, void* buffer, size_t size, int op);
 #define _K_VFS_C_ //TODO - remove define
 #ifdef _K_VFS_C_
 
-#include "thread.h"
-#include <types/time.h>
+#include "../thread.h"
+#include "types/time.h"
 
 #define KTYPE_FILE    (1<<10)
 

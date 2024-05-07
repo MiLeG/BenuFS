@@ -6,7 +6,7 @@
 #include "syscall.h"
 #include "device.h"
 #include "memory.h"
-#include "simplefs.h"
+#include "fs/simplefs.h"
 #include <kernel/errno.h>
 #include <kernel/features.h>
 #include <arch/interrupt.h>
