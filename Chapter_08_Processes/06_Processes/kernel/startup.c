@@ -56,13 +56,17 @@ void k_startup()
 
 	k_storage_init();
 	extern storage_t simpledisk;
+	storage_t disk2 = simpledisk;
+
 	kstorage_t* _simpledisk = k_storage_add(&simpledisk);
 
-//	storage_t disk2 = simpledisk;
-//	strcpy(disk2.name, "disk2");
+	strcpy(disk2.name, "disk2");
+	kstorage_t* _simpledisk2 = k_storage_add(&disk2);
+
 
 	/* filesystem init */
-	k_simplefs_init(_simpledisk, "/simplefs");
+	k_simplefs_init(_simpledisk2, "/simplefs");
+	k_simplefs_init(_simpledisk, "/disk");
 
 	/* thread subsystem */
 	kthreads_init();

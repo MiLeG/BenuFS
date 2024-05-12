@@ -10,74 +10,77 @@
 #include "../memory.h"
 #include "vfs.h"
 
-//TODO - pospremi statične stvari u kontekst LFS-a, kako bi mogli imati više instanci istog simplefs-a
+typedef struct SFSContext {
+	kstorage_t* disk;
+	struct fs_table* ft;
+	size_t ft_size;
 
-static kstorage_t* disk;
+	//TODO - dinamična alokacija ovoga s max brojem otvorenih fileova kao argument u initu
+	struct simplefs_file_desc fd_table[VFS_MAX_FDS];
+} SFSContext;
+
 #define DISK_WRITE(buffer, blocks, first_block) \
-k_store_sectors(disk, first_block, blocks, buffer);
+k_store_sectors(context->disk, first_block, blocks, buffer);
 
 #define DISK_READ(buffer, blocks, first_block) \
-k_load_sectors(disk, first_block, blocks, buffer);
+k_load_sectors(context->disk, first_block, blocks, buffer);
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #define max(a, b) ((a) > (b) ? (a) : (b))
 
-static struct fs_table* ft;
-static size_t ft_size;
 
-//TODO - dinamična alokacija ovoga s max brojem otvorenih fileova kao argument u initu
-static struct simplefs_file_desc fd_table[VFS_MAX_FDS];
-
-
-static int k_simplefs_open_file(char* pathname, int flags, mode_t mode);
-static int k_simplefs_close_file(int fd);
-static int k_simplefs_read_write(int fd, void* buffer, size_t size, int op);
+static int k_simplefs_open_file(char* pathname, int flags, mode_t mode, void* ctx);
+static int k_simplefs_close_file(int fd, void* ctx);
+static int k_simplefs_read_write(int fd, void* buffer, size_t size, int op, void* ctx);
 
 int k_simplefs_init(kstorage_t* storage, const char* mountpoint){
-	disk = storage;
-	assert(disk);
+	SFSContext* context = kmalloc(sizeof(SFSContext));
+	context->disk = storage;
+	assert(context->disk);
 
 	size_t blocks;
 	size_t bsize;
-	k_get_storage_info(&bsize, &blocks, disk);
+	k_get_storage_info(&bsize, &blocks, context->disk);
 
 	//initialize disk
-	ft_size = sizeof(struct fs_table) + blocks;
-	ft_size = (ft_size + bsize - 1) / bsize;
-	ft = kmalloc(ft_size * bsize);
-	memset(ft, 0, ft_size * bsize);
-	ft->file_system_type = FS_TYPE;
-	strcpy(ft->partition_name, storage->storage.name);
-	ft->block_size = bsize;
-	ft->blocks = blocks;
-	ft->max_files = MAXFILESONDISK;
+	context->ft_size = sizeof(struct fs_table) + blocks;
+	context->ft_size = (context->ft_size + bsize - 1) / bsize;
+	context->ft = kmalloc(context->ft_size * bsize);
+	memset(context->ft, 0, context->ft_size * bsize);
+	context->ft->file_system_type = FS_TYPE;
+	strcpy(context->ft->partition_name, storage->storage.name);
+	context->ft->block_size = bsize;
+	context->ft->blocks = blocks;
+	context->ft->max_files = MAXFILESONDISK;
 
 	int i;
-	for(i = ft_size; i < ft->blocks; i++)
-		ft->free[i] = 1;
+	for(i = context->ft_size; i < context->ft->blocks; i++)
+		context->ft->free[i] = 1;
 
-	DISK_WRITE(ft, ft_size, 0);
+	DISK_WRITE(context->ft, context->ft_size, 0);
 
-	memset(&fd_table, 0, sizeof(fd_table));
+	memset(&context->fd_table, 0, sizeof(context->fd_table));
 
 	//create lfs struct and register
 	klfs_t descriptor = {
-			.open = k_simplefs_open_file,
-			.close = k_simplefs_close_file,
-			.read_write = k_simplefs_read_write
+			.flags = LFS_FLAG_CONTEXT_PTR,
+			.open_p = k_simplefs_open_file,
+			.close_p = k_simplefs_close_file,
+			.read_write_p = k_simplefs_read_write
 	};
-	k_lfs_register(mountpoint, &descriptor);
+	k_lfs_register(mountpoint, &descriptor, context);
 
 
 	return 0;
 }
 
-int k_simplefs_open_file(char* pathname, int flags, mode_t mode){
+int k_simplefs_open_file(char* pathname, int flags, mode_t mode, void* ctx){
+	SFSContext* context = (SFSContext*) ctx;
 	struct fs_node* tfd = NULL;
 	const char* fname = pathname;
 
 	//check if file already open
-	struct simplefs_file_desc* fd = fd_table;
+	struct simplefs_file_desc* fd = context->fd_table;
 	for(int i = 0; i < VFS_MAX_FDS; i++){
 		if(fd->tfd && strcmp(fd->tfd->node_name, fname) == 0){
 			//already open!
@@ -94,9 +97,9 @@ int k_simplefs_open_file(char* pathname, int flags, mode_t mode){
 	if(!tfd){
 		//not already open; check if such file exists in file table
 		int i;
-		for(i = 0; i < ft->max_files; i++){
-			if(strcmp(ft->fd[i].node_name, fname) == 0){
-				tfd = &ft->fd[i];
+		for(i = 0; i < context->ft->max_files; i++){
+			if(strcmp(context->ft->fd[i].node_name, fname) == 0){
+				tfd = &context->ft->fd[i];
 				break;
 			}
 		}
@@ -110,9 +113,9 @@ int k_simplefs_open_file(char* pathname, int flags, mode_t mode){
 		//create fs_node in fs_table
 		//1. find unused descriptor
 		int i;
-		for(i = 0; i < ft->max_files; i++){
-			if(ft->fd[i].node_name[0] == 0){
-				tfd = &ft->fd[i];
+		for(i = 0; i < context->ft->max_files; i++){
+			if(context->ft->fd[i].node_name[0] == 0){
+				tfd = &context->ft->fd[i];
 				break;
 			}
 		}
@@ -132,7 +135,7 @@ int k_simplefs_open_file(char* pathname, int flags, mode_t mode){
 	}
 
 	//find free file descriptor
-	fd = fd_table;
+	fd = context->fd_table;
 	for(int i = 0; i < VFS_MAX_FDS; i++){
 		if(fd->tfd == NULL){
 			fd->tfd = tfd;
@@ -146,23 +149,26 @@ int k_simplefs_open_file(char* pathname, int flags, mode_t mode){
 	return -ENFILE;
 }
 
-int k_simplefs_close_file(int fd){
+int k_simplefs_close_file(int fd, void* ctx){
+	SFSContext* context = (SFSContext*) ctx;
+
 	if(fd < 0 || fd >= VFS_MAX_FDS)
 		return -EBADF;
 
-	fd_table[fd].tfd = NULL;
-	fd_table[fd].flags = 0;
-	fd_table[fd].fp = 0;
+	context->fd_table[fd].tfd = NULL;
+	context->fd_table[fd].flags = 0;
+	context->fd_table[fd].fp = 0;
 
 	return 0;
 }
 
 //op = 0 => write, otherwise =>read
-int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op){
+int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op, void* ctx){
 	if(fd_index < 0 || fd_index >= VFS_MAX_FDS)
 		return -EBADF;
 
-	struct simplefs_file_desc* fd = &fd_table[fd_index];
+	SFSContext* context = (SFSContext*) ctx;
+	struct simplefs_file_desc* fd = &context->fd_table[fd_index];
 
 	if(op){
 		//read from offset "fd->fp" to "buffer" "size" bytes
@@ -184,9 +190,9 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op){
 		// #----|fp|-------#-----------#
 		//         |    size    |
 
-		char buf[ft->block_size];
+		char buf[context->ft->block_size];
 		size_t leftToRead = size;
-		size_t block = fd->fp / ft->block_size;
+		size_t block = fd->fp / context->ft->block_size;
 
 
 		while(leftToRead > 0 &&
@@ -196,9 +202,9 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op){
 			DISK_READ(buf, 1, fd->tfd->block[block]);
 
 
-			size_t toCopy = min(min(leftToRead, fd->tfd->size - fd->fp), ft->block_size - fd->fp % ft->block_size);
+			size_t toCopy = min(min(leftToRead, fd->tfd->size - fd->fp), context->ft->block_size - fd->fp % context->ft->block_size);
 
-			memcpy(buffer, buf + fd->fp % ft->block_size, toCopy);
+			memcpy(buffer, buf + fd->fp % context->ft->block_size, toCopy);
 			buffer += toCopy;
 			fd->fp += toCopy;
 			leftToRead -= toCopy;
@@ -210,7 +216,7 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op){
 		timespec_t t;
 		kclock_gettime(CLOCK_REALTIME, &t);
 		fd->tfd->ta = t;
-		DISK_WRITE(ft, ft_size, 0);
+		DISK_WRITE(context->ft, context->ft_size, 0);
 
 		return size - leftToRead;
 
@@ -224,18 +230,18 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op){
 
 		//size_t block = fd->fp / ft->block_size;
 
-		char buf[ft->block_size];
+		char buf[context->ft->block_size];
 		size_t leftToWrite = size;
-		size_t block = fd->fp / ft->block_size;
-		size_t maxfilesize = ft->block_size * MAXFILEBLOCKS;
+		size_t block = fd->fp / context->ft->block_size;
+		size_t maxfilesize = context->ft->block_size * MAXFILEBLOCKS;
 
 
 		while(leftToWrite > 0 && fd->fp < maxfilesize){
 			if(fd->tfd->block[block] == 0){
 				size_t freeBlock = -1;
-				for(size_t i = 0; i < ft->blocks; ++i){
-					if(ft->free[i]){
-						ft->free[i] = 0;
+				for(size_t i = 0; i < context->ft->blocks; ++i){
+					if(context->ft->free[i]){
+						context->ft->free[i] = 0;
 						freeBlock = i;
 
 						break;
@@ -246,8 +252,8 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op){
 			}
 			DISK_READ(buf, 1, fd->tfd->block[block]);
 
-			size_t toCopy = min(leftToWrite, ft->block_size - fd->fp % ft->block_size);
-			memcpy(buf + fd->fp % ft->block_size, buffer, toCopy);
+			size_t toCopy = min(leftToWrite, context->ft->block_size - fd->fp % context->ft->block_size);
+			memcpy(buf + fd->fp % context->ft->block_size, buffer, toCopy);
 
 			DISK_WRITE(buf, 1, fd->tfd->block[block]);
 
@@ -265,7 +271,7 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op){
 		kclock_gettime(CLOCK_REALTIME, &t);
 		fd->tfd->ta = fd->tfd->tm = t;
 
-		DISK_WRITE(ft, ft_size, 0);
+		DISK_WRITE(context->ft, context->ft_size, 0);
 
 		return size - leftToWrite;
 	}

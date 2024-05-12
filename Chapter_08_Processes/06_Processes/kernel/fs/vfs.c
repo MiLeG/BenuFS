@@ -19,7 +19,7 @@ typedef struct {
 typedef struct _vfs_entry_t_ {
 	klfs_t lfs;          // contains pointers to FS functions
 	char path_prefix[LFS_PREFIX_MAX]; // path prefix mapped to this VFS
-//    void* ctx;              // optional pointer which can be passed to VFS
+	void* ctx;              // optional pointer which can be passed to VFS
 	int offset;             // index of this structure in s_vfs array
 } vfs_entry_t;
 
@@ -28,6 +28,19 @@ static size_t s_lfs_count = 0;
 
 static fd_table_t s_fd_table[VFS_MAX_FDS] = { [0 ... VFS_MAX_FDS - 1] = FD_TABLE_ENTRY_UNUSED};
 static struct kfile_desc* last_check;
+
+
+//Used for checking if LFS requires context ptr
+#define CHECK_PTR_CALL(ret, vfsEntry, func, ...) \
+    if (vfsEntry->lfs.func == NULL) { \
+        ret = -ENOSYS; \
+    } \
+    if (vfsEntry->lfs.flags & LFS_FLAG_CONTEXT_PTR) { \
+        ret = vfsEntry->lfs.func ## _p(__VA_ARGS__, vfsEntry->ctx); \
+    } else { \
+        ret = vfsEntry->lfs.func(__VA_ARGS__);\
+    }
+
 
 static const vfs_entry_t* get_lfs_for_path(const char* path){
 	//TODO - check for similiar prefixes, pick longer prefix (e.g. /uart/ and /uart/dev0/)
@@ -81,7 +94,7 @@ static const char* translate_path(const vfs_entry_t* vfs, const char* src_path){
 	return src_path + strlen(vfs->path_prefix);
 }
 
-int k_lfs_register(const char* base_path, const klfs_t* lfs){
+int k_lfs_register(const char* base_path, const klfs_t* lfs, void* ctx){
 	size_t len = strlen(base_path);
 	/* empty prefix is allowed, "/" is not allowed */
 	if((len == 1) || (len > LFS_PREFIX_MAX)){
@@ -113,7 +126,7 @@ int k_lfs_register(const char* base_path, const klfs_t* lfs){
 	strcpy(entry->path_prefix, base_path); // we have already verified argument length
 
 	memcpy(&entry->lfs, lfs, sizeof(klfs_t));
-//	entry->ctx = ctx;
+	entry->ctx = ctx;
 	entry->offset = index;
 
 	return EXIT_SUCCESS;
@@ -176,7 +189,9 @@ int k_vfs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 		return -ENOENT;
 	}
 	const char* path_within_lfs = translate_path(vfs, fname);
-	int fd_within_lfs = vfs->lfs.open((char*) path_within_lfs, flags, mode);
+	int fd_within_lfs;
+	CHECK_PTR_CALL(fd_within_lfs, vfs, open, (char*) path_within_lfs, flags, mode);
+//	int fd_within_lfs = vfs->lfs.open((char*) path_within_lfs, flags, mode);
 
 	int vfs_index = -1;
 	if(fd_within_lfs >= 0){
@@ -193,7 +208,10 @@ int k_vfs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 //		_lock_release(&s_fd_table_lock);
 
 		if(vfs_index == -1){
-			vfs->lfs.close(fd_within_lfs);
+			int ret;
+			CHECK_PTR_CALL(ret, vfs, close, fd_within_lfs);
+			(void)ret; //to resolve "ret set but not used" compiler warning
+//			vfs->lfs.close(fd_within_lfs);
 			return -ENOMEM;
 		}
 	}else{
@@ -225,7 +243,8 @@ int k_vfs_close_file(descriptor_t* desc){
 		return -EBADF;
 	}
 	int ret;
-	ret = vfs->lfs.close(local_fd);
+	CHECK_PTR_CALL(ret, vfs, close, local_fd);
+//	ret = vfs->lfs.close(local_fd);
 
 //	_lock_acquire(&s_fd_table_lock);
 	s_fd_table[fd] = FD_TABLE_ENTRY_UNUSED;
@@ -247,6 +266,9 @@ int k_vfs_read_write(descriptor_t* desc, void* buffer, size_t size, int op){
 		return -EBADF;
 	}
 
-	int ret = vfs->lfs.read_write(local_fd, buffer, size, op);
+//	int ret = vfs->lfs.read_write(local_fd, buffer, size, op);
+	int ret;
+	CHECK_PTR_CALL(ret, vfs, read_write, local_fd, buffer, size, op);
+
 	return ret;
 }

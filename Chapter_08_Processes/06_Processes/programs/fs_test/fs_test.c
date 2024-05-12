@@ -7,6 +7,8 @@ char PROG_HELP[] = "Filesystem demo test.";
 
 
 void createWriteTwoRead(){
+	printf("----createWriteTwoRead-----\n");
+
 	//create, write, read content with two read files open
 	int fd = open("/simplefs/test", O_CREAT | O_WRONLY, 0);
 	printf("fd=%d\n", fd);
@@ -30,9 +32,13 @@ void createWriteTwoRead(){
 
 	close(fd);
 	close(fd2);
+
+	printf("\n");
 }
 
 void rewriteNoNewBlock(){
+	printf("----rewriteNoNewBlock-----\n");
+
 	//rewrite without new block allocation
 	int fd = open("/simplefs/test", O_WRONLY, 0);
 	write(fd, "neki tekstttt", 14);
@@ -43,9 +49,12 @@ void rewriteNoNewBlock(){
 	read(fd, buf, 14);
 	printf("buff=%s\n", buf);
 	close(fd);
+
+	printf("\n");
 }
 
 void rewriteNewBlocks(){
+	printf("----rewriteNewBlocks-----\n");
 	//rewrite with new block allocation
 	char buf[500];
 	memset(buf, 'a', sizeof(buf));
@@ -81,6 +90,42 @@ void rewriteNewBlocks(){
 			printf("buff=%s\n", readBuf);
 		}
 	}while(retval > 0);
+	printf("\n");
+}
+
+void twoFSTest(){
+	printf("----twoFSTest-----\n");
+	//create, write content and copy to a new file in /disk filesystem (/simplefs and /disk)
+	int fd = open("/simplefs/twoFSTest", O_CREAT | O_WRONLY, 0);
+	printf("fd=%d\n", fd);
+	int retval = write(fd, "neki tekst", 11);
+	printf("retval=%d\n", retval);
+	retval = close(fd);
+	printf("retval=%d\n", retval);
+
+	fd = open("/simplefs/twoFSTest", O_RDONLY, 0);
+	printf("fd=%d\n", fd);
+	char buff[11];
+	retval = read(fd, buff, 11);
+	printf("retval=%d\n", retval);
+	printf("buff=%s\n", buff);
+
+	fd = open("/disk/twoFSTest", O_CREAT | O_WRONLY, 0);
+	printf("fd=%d\n", fd);
+	retval = write(fd, buff, 11);
+	printf("retval=%d\n", retval);
+	retval = close(fd);
+	printf("retval=%d\n", retval);
+
+	fd = open("/disk/twoFSTest", O_RDONLY, 0);
+	printf("fd=%d\n", fd);
+	retval = read(fd, buff, 11);
+	printf("retval=%d\n", retval);
+	printf("buff=%s\n", buff);
+	retval = close(fd);
+	printf("retval=%d\n", retval);
+
+	printf("\n");
 }
 
 int fs_test(char* args[]){
@@ -90,8 +135,7 @@ int fs_test(char* args[]){
 	createWriteTwoRead();
 	rewriteNoNewBlock();
 	rewriteNewBlocks();
+	twoFSTest();
 
 	return 0;
 }
-//dev todo:
-//seek, peek, delete, rename
