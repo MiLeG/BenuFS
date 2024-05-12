@@ -7,6 +7,7 @@
 #include "device.h"
 #include "memory.h"
 #include "fs/simplefs.h"
+#include "fs/storage.h"
 #include <kernel/errno.h>
 #include <kernel/features.h>
 #include <arch/interrupt.h>
@@ -52,6 +53,10 @@ void k_startup()
 	k_stdout = k_device_open(K_STDOUT, O_WRONLY);
 
 	kprintf("%s\n", system_info);
+
+	k_storage_init();
+	extern storage_t simpledisk;
+	k_storage_add(&simpledisk);
 
 	/* filesystem init */
 	k_simplefs_init("DISK", 512, 4096);
