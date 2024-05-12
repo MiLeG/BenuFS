@@ -1,7 +1,9 @@
 /*! Simple file system */
 #pragma once
 
-int k_simplefs_init(char* disk_device, size_t bsize, size_t blocks);
+#include "storage.h"
+
+int k_simplefs_init(kstorage_t* storage, const char* mountpoint);
 
 #define _K_SIMPLEFS_C_
 

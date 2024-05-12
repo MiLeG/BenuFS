@@ -16,6 +16,7 @@ int k_storage_init(){
 
 kstorage_t* k_storage_add(storage_t* storage){
 	ASSERT(storage);
+	storage->init(NULL, storage);
 
 	kstorage_t* stor = kmalloc(sizeof(kstorage_t));
 

@@ -10,12 +10,14 @@
 #include "../memory.h"
 #include "vfs.h"
 
-static kdevice_t* disk;
+//TODO - pospremi statične stvari u kontekst LFS-a, kako bi mogli imati više instanci istog simplefs-a
+
+static kstorage_t* disk;
 #define DISK_WRITE(buffer, blocks, first_block) \
-k_device_send(buffer, (first_block << 16) | blocks, 0, disk);
+k_store_sectors(disk, first_block, blocks, buffer);
 
 #define DISK_READ(buffer, blocks, first_block) \
-k_device_recv(buffer, (first_block << 16) | blocks, 0, disk);
+k_load_sectors(disk, first_block, blocks, buffer);
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #define max(a, b) ((a) > (b) ? (a) : (b))
@@ -31,9 +33,13 @@ static int k_simplefs_open_file(char* pathname, int flags, mode_t mode);
 static int k_simplefs_close_file(int fd);
 static int k_simplefs_read_write(int fd, void* buffer, size_t size, int op);
 
-int k_simplefs_init(char* disk_device, size_t bsize, size_t blocks){
-	disk = k_device_open(disk_device, 0);
+int k_simplefs_init(kstorage_t* storage, const char* mountpoint){
+	disk = storage;
 	assert(disk);
+
+	size_t blocks;
+	size_t bsize;
+	k_get_storage_info(&bsize, &blocks, disk);
 
 	//initialize disk
 	ft_size = sizeof(struct fs_table) + blocks;
@@ -41,7 +47,7 @@ int k_simplefs_init(char* disk_device, size_t bsize, size_t blocks){
 	ft = kmalloc(ft_size * bsize);
 	memset(ft, 0, ft_size * bsize);
 	ft->file_system_type = FS_TYPE;
-	strcpy(ft->partition_name, disk_device);
+	strcpy(ft->partition_name, storage->storage.name);
 	ft->block_size = bsize;
 	ft->blocks = blocks;
 	ft->max_files = MAXFILESONDISK;
@@ -60,7 +66,7 @@ int k_simplefs_init(char* disk_device, size_t bsize, size_t blocks){
 			.close = k_simplefs_close_file,
 			.read_write = k_simplefs_read_write
 	};
-	k_lfs_register("/simplefs", &descriptor);
+	k_lfs_register(mountpoint, &descriptor);
 
 
 	return 0;
