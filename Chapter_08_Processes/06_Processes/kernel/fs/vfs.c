@@ -7,26 +7,33 @@
 #include "../memory.h"
 #include ASSERT_H
 
-typedef int8 vfs_index_t;
-typedef uint8 local_fd_t;
+typedef int8 lfs_index_t; //index of registered LFS, -1 - empty/invalid
+typedef int local_fd_t; //file descriptor handle for specific LFS
 
-typedef struct {
-	vfs_index_t vfs_index;
-	local_fd_t local_fd;
-} fd_table_t;
-#define FD_TABLE_ENTRY_UNUSED   (fd_table_t) {.vfs_index = -1, .local_fd = -1 }
-
-typedef struct _vfs_entry_t_ {
+//struktura registriranog LFS-a
+typedef struct _lfs_entry_t_ {
 	klfs_t lfs;          // contains pointers to FS functions
 	char path_prefix[LFS_PREFIX_MAX]; // path prefix mapped to this VFS
 	void* ctx;              // optional pointer which can be passed to VFS
 	int offset;             // index of this structure in s_vfs array
-} vfs_entry_t;
+} lfs_entry_t;
 
-static vfs_entry_t* s_vfs[VFS_MAX_COUNT] = { 0 };
-static size_t s_lfs_count = 0;
+//polje registriranih LFS-ova
+static lfs_entry_t* lfs_entries[VFS_MAX_COUNT] = { 0 };
+//broj registriranih LFS-ova
+static size_t lfs_count = 0;
 
-static fd_table_t s_fd_table[VFS_MAX_FDS] = { [0 ... VFS_MAX_FDS - 1] = FD_TABLE_ENTRY_UNUSED};
+//struktura virtualnog datotečnog opisnika
+typedef struct {
+	lfs_index_t lfs_index; //indeks LFS-a u kojem se datoteka nalazi
+	local_fd_t local_fd; //identifikator opisnika u lokalnom kontekstu pripadajućeg LFS-a
+} virtual_fd_t;
+
+//makro za prazan element u polju virtualnih opisnika
+#define FD_TABLE_ENTRY_UNUSED   (virtual_fd_t) {.lfs_index = -1, .local_fd = -1 }
+
+//polje virtualnih datotečnih opisnika
+static virtual_fd_t virtual_fd_table[VFS_MAX_FDS] = { [0 ... VFS_MAX_FDS - 1] = FD_TABLE_ENTRY_UNUSED};
 static struct kfile_desc* last_check;
 
 
@@ -42,11 +49,11 @@ static struct kfile_desc* last_check;
     }
 
 
-static const vfs_entry_t* get_lfs_for_path(const char* path){
+static const lfs_entry_t* get_lfs_for_path(const char* path){
 	//TODO - check for similiar prefixes, pick longer prefix (e.g. /uart/ and /uart/dev0/)
-	const vfs_entry_t* vfs_match = NULL;
-	for(size_t i = 0; i < s_lfs_count; ++i){
-		const vfs_entry_t* vfs = s_vfs[i];
+	const lfs_entry_t* vfs_match = NULL;
+	for(size_t i = 0; i < lfs_count; ++i){
+		const lfs_entry_t* vfs = lfs_entries[i];
 
 		if(strncmp(path, vfs->path_prefix, strlen(vfs->path_prefix)) == 0){
 			vfs_match = vfs;
@@ -61,35 +68,35 @@ static int vfs_fd_valid(int vfs_fd){
 	return (vfs_fd >= 0) && (vfs_fd < VFS_MAX_FDS);
 }
 
-static const vfs_entry_t* get_lfs_for_index(int index){
-	if(index < 0 || index >= s_lfs_count){
+static const lfs_entry_t* get_lfs_for_index(int index){
+	if(index < 0 || index >= lfs_count){
 		return NULL;
 	}else{
-		return s_vfs[index];
+		return lfs_entries[index];
 	}
 }
 
-static const vfs_entry_t* get_lfs_for_fd(int fd){
-	const vfs_entry_t* vfs = NULL;
+static const lfs_entry_t* get_lfs_for_fd(int fd){
+	const lfs_entry_t* vfs = NULL;
 	if(vfs_fd_valid(fd)){
-		const int index = s_fd_table[fd].vfs_index; // single read -> no locking is required
+		const int index = virtual_fd_table[fd].lfs_index; // single read -> no locking is required
 		vfs = get_lfs_for_index(index);
 	}
 	return vfs;
 }
 
-static inline int get_local_fd(const vfs_entry_t* vfs, int fd){
+static inline int get_local_fd(const lfs_entry_t* vfs, int fd){
 	int local_fd = -1;
 
 	if(vfs && vfs_fd_valid(fd)){
-		local_fd = s_fd_table[fd].local_fd; // single read -> no locking is required
+		local_fd = virtual_fd_table[fd].local_fd; // single read -> no locking is required
 	}
 
 	return local_fd;
 }
 
 
-static const char* translate_path(const vfs_entry_t* vfs, const char* src_path){
+static const char* translate_path(const lfs_entry_t* vfs, const char* src_path){
 	ASSERT(strncmp(src_path, vfs->path_prefix, strlen(vfs->path_prefix)) == 0);
 	return src_path + strlen(vfs->path_prefix);
 }
@@ -105,24 +112,24 @@ int k_lfs_register(const char* base_path, const klfs_t* lfs, void* ctx){
 		return -EINVAL;
 	}
 
-	vfs_entry_t* entry = (vfs_entry_t*) kmalloc(sizeof(vfs_entry_t));
+	lfs_entry_t* entry = (lfs_entry_t*) kmalloc(sizeof(lfs_entry_t));
 	if(entry == NULL){
 		return -ENOMEM;
 	}
 	size_t index;
-	for(index = 0; index < s_lfs_count; ++index){
-		if(s_vfs[index] == NULL){
+	for(index = 0; index < lfs_count; ++index){
+		if(lfs_entries[index] == NULL){
 			break;
 		}
 	}
-	if(index == s_lfs_count){
-		if(s_lfs_count >= VFS_MAX_COUNT){
+	if(index == lfs_count){
+		if(lfs_count >= VFS_MAX_COUNT){
 			kfree(entry);
 			return -ENOMEM;
 		}
-		++s_lfs_count;
+		++lfs_count;
 	}
-	s_vfs[index] = entry;
+	lfs_entries[index] = entry;
 	strcpy(entry->path_prefix, base_path); // we have already verified argument length
 
 	memcpy(&entry->lfs, lfs, sizeof(klfs_t));
@@ -134,19 +141,19 @@ int k_lfs_register(const char* base_path, const klfs_t* lfs, void* ctx){
 }
 
 int k_lfs_unregister(const char* base_path){
-	for(size_t i = 0; i < s_lfs_count; ++i){
-		vfs_entry_t* vfs = s_vfs[i];
+	for(size_t i = 0; i < lfs_count; ++i){
+		lfs_entry_t* vfs = lfs_entries[i];
 		if(vfs == NULL){
 			continue;
 		}
 		if(strcmp(base_path, vfs->path_prefix) == 0){
 			kfree(vfs);
-			s_vfs[i] = NULL;
+			lfs_entries[i] = NULL;
 
 			// Delete all references from the FD lookup-table
 			for(int j = 0; j < VFS_MAX_COUNT; ++j){
-				if(s_fd_table[j].vfs_index == i){
-					s_fd_table[j] = FD_TABLE_ENTRY_UNUSED;
+				if(virtual_fd_table[j].lfs_index == i){
+					virtual_fd_table[j] = FD_TABLE_ENTRY_UNUSED;
 				}
 			}
 
@@ -166,7 +173,7 @@ int k_vfs_is_file_open(descriptor_t* desc){
 	if(kobj && list_find(&proc->kobjects, &kobj->list) &&
 	   (kobj->flags & KTYPE_FILE) != 0){
 		struct kfile_desc* fd = kobj->kobject;
-		if(fd && fd->id == desc->id && vfs_fd_valid(fd->vfs_fd) && s_fd_table[fd->vfs_fd].vfs_index != -1){
+		if(fd && fd->id == desc->id && vfs_fd_valid(fd->vfs_fd) && virtual_fd_table[fd->vfs_fd].lfs_index != -1){
 			last_check = fd;
 			return 0;
 		}
@@ -184,7 +191,7 @@ int k_vfs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 	   ((flags & O_WRONLY) && (flags & O_RDWR)))
 		return -EINVAL;
 
-	const vfs_entry_t* vfs = get_lfs_for_path(fname);
+	const lfs_entry_t* vfs = get_lfs_for_path(fname);
 	if(vfs == NULL){
 		return -ENOENT;
 	}
@@ -197,9 +204,9 @@ int k_vfs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 	if(fd_within_lfs >= 0){
 //		_lock_acquire(&s_fd_table_lock);
 		for(int i = 0; i < VFS_MAX_FDS; ++i){
-			if(s_fd_table[i].vfs_index == -1){
-				s_fd_table[i].vfs_index = vfs->offset;
-				s_fd_table[i].local_fd = fd_within_lfs;
+			if(virtual_fd_table[i].lfs_index == -1){
+				virtual_fd_table[i].lfs_index = vfs->offset;
+				virtual_fd_table[i].local_fd = fd_within_lfs;
 //				_lock_release(&s_fd_table_lock);
 				vfs_index = i;
 				break;
@@ -210,7 +217,7 @@ int k_vfs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 		if(vfs_index == -1){
 			int ret;
 			CHECK_PTR_CALL(ret, vfs, close, fd_within_lfs);
-			(void)ret; //to resolve "ret set but not used" compiler warning
+			(void) ret; //to resolve "ret set but not used" compiler warning
 //			vfs->lfs.close(fd_within_lfs);
 			return -ENOMEM;
 		}
@@ -237,7 +244,7 @@ int k_vfs_open_file(char* pathname, int flags, mode_t mode, descriptor_t* desc){
 
 int k_vfs_close_file(descriptor_t* desc){
 	int fd = last_check->vfs_fd;
-	const vfs_entry_t* vfs = get_lfs_for_fd(fd);
+	const lfs_entry_t* vfs = get_lfs_for_fd(fd);
 	const int local_fd = get_local_fd(vfs, fd);
 	if(vfs == NULL || local_fd < 0){
 		return -EBADF;
@@ -247,7 +254,7 @@ int k_vfs_close_file(descriptor_t* desc){
 //	ret = vfs->lfs.close(local_fd);
 
 //	_lock_acquire(&s_fd_table_lock);
-	s_fd_table[fd] = FD_TABLE_ENTRY_UNUSED;
+	virtual_fd_table[fd] = FD_TABLE_ENTRY_UNUSED;
 //	_lock_release(&s_fd_table_lock);
 
 	return ret;
@@ -260,7 +267,7 @@ int k_vfs_read_write(descriptor_t* desc, void* buffer, size_t size, int op){
 		return -EPERM;
 
 	int fd_index = fd->vfs_fd;
-	const vfs_entry_t* vfs = get_lfs_for_fd(fd_index);
+	const lfs_entry_t* vfs = get_lfs_for_fd(fd_index);
 	const int local_fd = get_local_fd(vfs, fd_index);
 	if(vfs == NULL || local_fd < 0){
 		return -EBADF;

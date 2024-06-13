@@ -11,23 +11,16 @@
 #include "vfs.h"
 
 typedef struct SFSContext {
-	kstorage_t* disk;
-	struct fs_table* ft;
-	size_t ft_size;
+	kstorage_t* disk; //disk na kojem je inicijaliziran SFS
+	struct sfs_table* ft; //file table
+	size_t ft_size; //file table size
 
 	//TODO - dinamična alokacija ovoga s max brojem otvorenih fileova kao argument u initu
-	struct simplefs_file_desc fd_table[VFS_MAX_FDS];
+	struct sfs_file_desc fd_table[VFS_MAX_FDS]; //polje otvorenih datoteka
 } SFSContext;
-
-#define DISK_WRITE(buffer, blocks, first_block) \
-k_store_sectors(context->disk, first_block, blocks, buffer);
-
-#define DISK_READ(buffer, blocks, first_block) \
-k_load_sectors(context->disk, first_block, blocks, buffer);
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 #define max(a, b) ((a) > (b) ? (a) : (b))
-
 
 static int k_simplefs_open_file(char* pathname, int flags, mode_t mode, void* ctx);
 static int k_simplefs_close_file(int fd, void* ctx);
@@ -43,12 +36,10 @@ int k_simplefs_init(kstorage_t* storage, const char* mountpoint){
 	k_get_storage_info(&bsize, &blocks, context->disk);
 
 	//initialize disk
-	context->ft_size = sizeof(struct fs_table) + blocks;
+	context->ft_size = sizeof(struct sfs_table) + blocks;
 	context->ft_size = (context->ft_size + bsize - 1) / bsize;
 	context->ft = kmalloc(context->ft_size * bsize);
 	memset(context->ft, 0, context->ft_size * bsize);
-	context->ft->file_system_type = FS_TYPE;
-	strcpy(context->ft->partition_name, storage->storage.name);
 	context->ft->block_size = bsize;
 	context->ft->blocks = blocks;
 	context->ft->max_files = MAXFILESONDISK;
@@ -57,7 +48,7 @@ int k_simplefs_init(kstorage_t* storage, const char* mountpoint){
 	for(i = context->ft_size; i < context->ft->blocks; i++)
 		context->ft->free[i] = 1;
 
-	DISK_WRITE(context->ft, context->ft_size, 0);
+	k_store_sectors(context->disk, 0, context->ft_size, context->ft);
 
 	memset(&context->fd_table, 0, sizeof(context->fd_table));
 
@@ -76,11 +67,11 @@ int k_simplefs_init(kstorage_t* storage, const char* mountpoint){
 
 int k_simplefs_open_file(char* pathname, int flags, mode_t mode, void* ctx){
 	SFSContext* context = (SFSContext*) ctx;
-	struct fs_node* tfd = NULL;
+	struct sfs_node* tfd = NULL;
 	const char* fname = pathname;
 
 	//check if file already open
-	struct simplefs_file_desc* fd = context->fd_table;
+	struct sfs_file_desc* fd = context->fd_table;
 	for(int i = 0; i < VFS_MAX_FDS; i++){
 		if(fd->tfd && strcmp(fd->tfd->node_name, fname) == 0){
 			//already open!
@@ -168,7 +159,7 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op, void*
 		return -EBADF;
 
 	SFSContext* context = (SFSContext*) ctx;
-	struct simplefs_file_desc* fd = &context->fd_table[fd_index];
+	struct sfs_file_desc* fd = &context->fd_table[fd_index];
 
 	if(op){
 		//read from offset "fd->fp" to "buffer" "size" bytes
@@ -199,7 +190,7 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op, void*
 			  fd->fp < fd->tfd->size &&
 			  fd->tfd->block[block] >= 0){
 
-			DISK_READ(buf, 1, fd->tfd->block[block]);
+			k_load_sectors(context->disk, fd->tfd->block[block], 1, buf);
 
 
 			size_t toCopy = min(min(leftToRead, fd->tfd->size - fd->fp), context->ft->block_size - fd->fp % context->ft->block_size);
@@ -216,7 +207,7 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op, void*
 		timespec_t t;
 		kclock_gettime(CLOCK_REALTIME, &t);
 		fd->tfd->ta = t;
-		DISK_WRITE(context->ft, context->ft_size, 0);
+		k_store_sectors(context->disk, 0, context->ft_size, context->ft);
 
 		return size - leftToRead;
 
@@ -250,12 +241,12 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op, void*
 				if(freeBlock == -1) break;
 				fd->tfd->block[block] = freeBlock;
 			}
-			DISK_READ(buf, 1, fd->tfd->block[block]);
+			k_load_sectors(context->disk, fd->tfd->block[block], 1, buf);
 
 			size_t toCopy = min(leftToWrite, context->ft->block_size - fd->fp % context->ft->block_size);
 			memcpy(buf + fd->fp % context->ft->block_size, buffer, toCopy);
 
-			DISK_WRITE(buf, 1, fd->tfd->block[block]);
+			k_store_sectors(context->disk, fd->tfd->block[block], 1, buf);
 
 
 			buffer += toCopy;
@@ -271,7 +262,7 @@ int k_simplefs_read_write(int fd_index, void* buffer, size_t size, int op, void*
 		kclock_gettime(CLOCK_REALTIME, &t);
 		fd->tfd->ta = fd->tfd->tm = t;
 
-		DISK_WRITE(context->ft, context->ft_size, 0);
+		k_store_sectors(context->disk, 0, context->ft_size, context->ft);
 
 		return size - leftToWrite;
 	}

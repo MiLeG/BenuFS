@@ -270,6 +270,7 @@ int sys__open(void *p)
 	ASSERT_ERRNO_AND_EXIT(desc, EINVAL);
 
 
+	//file descriptor?
 	if (pathname[0] == '/') {
 		int retval = k_vfs_open_file(pathname, flags, mode, desc);
 		if (retval >= 0)

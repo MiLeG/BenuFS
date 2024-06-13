@@ -95,35 +95,23 @@ void rewriteNewBlocks(){
 
 void twoFSTest(){
 	printf("----twoFSTest-----\n");
-	//create, write content and copy to a new file in /disk filesystem (/simplefs and /disk)
 	int fd = open("/simplefs/twoFSTest", O_CREAT | O_WRONLY, 0);
-	printf("fd=%d\n", fd);
-	int retval = write(fd, "neki tekst", 11);
-	printf("retval=%d\n", retval);
-	retval = close(fd);
-	printf("retval=%d\n", retval);
+	write(fd, "neki tekst", 11);
+	close(fd);
 
 	fd = open("/simplefs/twoFSTest", O_RDONLY, 0);
-	printf("fd=%d\n", fd);
 	char buff[11];
-	retval = read(fd, buff, 11);
-	printf("retval=%d\n", retval);
-	printf("buff=%s\n", buff);
+	read(fd, buff, 11);
+	printf("sadržaj /simplefs/twoFSTest: %s\n", buff);
 
 	fd = open("/disk/twoFSTest", O_CREAT | O_WRONLY, 0);
-	printf("fd=%d\n", fd);
-	retval = write(fd, buff, 11);
-	printf("retval=%d\n", retval);
-	retval = close(fd);
-	printf("retval=%d\n", retval);
+	write(fd, buff, 11);
+	close(fd);
 
 	fd = open("/disk/twoFSTest", O_RDONLY, 0);
-	printf("fd=%d\n", fd);
-	retval = read(fd, buff, 11);
-	printf("retval=%d\n", retval);
-	printf("buff=%s\n", buff);
-	retval = close(fd);
-	printf("retval=%d\n", retval);
+	read(fd, buff, 11);
+	printf("sadržaj /disk/twoFSTest: %s\n", buff);
+	close(fd);
 
 	printf("\n");
 }

@@ -13,13 +13,12 @@ int k_simplefs_init(kstorage_t* storage, const char* mountpoint);
 #include <types/time.h>
 #include "vfs.h"
 
-#define FS_TYPE        42 //any number will do :)
-
 #define MAXFILESONDISK    16
 #define MAXFILENAMESIZE    16
 #define MAXFILEBLOCKS    16
 
-struct fs_node {
+//file node
+struct sfs_node {
 	char node_name[MAXFILENAMESIZE];
 	size_t id;      // position in file table
 	timespec_t tc;  // time of file creation
@@ -30,14 +29,13 @@ struct fs_node {
 	size_t block[MAXFILEBLOCKS]; // where are blocks on disk
 } __attribute__((packed));
 
-struct fs_table {
-	int file_system_type;
-	char partition_name[MAXFILENAMESIZE];
-	size_t block_size;
-	size_t blocks;
-	size_t max_files;
-	struct fs_node fd[MAXFILESONDISK];
-	char free[1]; // bitmap would be better, but ...
+//file table
+struct sfs_table {
+	size_t block_size; //size of one block
+	size_t blocks; //number of blocks on disk
+	size_t max_files; //maximum number of files
+	struct sfs_node fd[MAXFILESONDISK]; //array of simplefs nodes
+	char free[1]; //array of chars indicating free/occupied blocks
 } __attribute__((packed));
 
 /* disk blocks:
@@ -46,8 +44,8 @@ struct fs_table {
 */
 
 //open file descriptor
-struct simplefs_file_desc {
-	struct fs_node* tfd; //pointer to descriptor in file table in memory
+struct sfs_file_desc {
+	struct sfs_node* tfd; //pointer to descriptor in file table in memory
 	int flags;
 	size_t fp; //file pointer, offset from beginning
 };
